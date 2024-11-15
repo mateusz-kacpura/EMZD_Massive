@@ -325,3 +325,43 @@ Muthukrishnan, S. (2005). \textit{Data streams: Algorithms and applications}. Fo
 \end{thebibliography}
 
 \end{document}
+
+
+
+"""
+# Testy
+def test_digm_random():
+    N = 50
+    digm = DGIMOptimized(N)
+    stream_length = 100
+    stream = [random.randint(0, 1) for _ in range(stream_length)]
+
+    for bit in stream:
+        digm.process_bit(bit)
+
+    estimated_count = digm.query()
+    actual_count = sum(stream[-N:])
+    print("Test z losowym strumieniem:")
+    print(f"Estymowana liczba jedynek w ostatnich {N} bitach: {estimated_count}")
+    print(f"Rzeczywista liczba jedynek: {actual_count}")
+    print(f"Błąd estymacji: {abs(estimated_count - actual_count)}")
+
+def test_digm_blocks():
+    N = 100
+    digm = DGIMOptimized(N)
+    stream = [1]*50 + [0]*50 + [1]*50 + [0]*50
+
+    for bit in stream:
+        digm.process_bit(bit)
+
+    estimated_count = digm.query()
+    actual_count = sum(stream[-N:])
+    print("\nTest ze strumieniem z blokami:")
+    print(f"Estymowana liczba jedynek w ostatnich {N} bitach: {estimated_count}")
+    print(f"Rzeczywista liczba jedynek: {actual_count}")
+    print(f"Błąd estymacji: {abs(estimated_count - actual_count)}")
+
+if __name__ == "__main__":
+    test_digm_random()
+    test_digm_blocks()
+"""
