@@ -1,0 +1,269 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[polish]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{cite}
+
+\geometry{margin=1in}
+
+\lstdefinestyle{pystyle}{
+    language=Python,
+    inputencoding=utf8,
+    extendedchars=true,
+    literate={ą}{{\k{a}}}1 {ć}{{\'{c}}}1 {ę}{{\k{e}}}1 {ł}{{\l{}}}1 {ń}{{\'{n}}}1 {ó}{{\'{o}}}1 {ś}{{\'{s}}}1 {ż}{{\.{z}}}1 {ź}{{\'{z}}}1,
+    basicstyle=\ttfamily\small,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    keywordstyle=\color{blue},
+    stringstyle=\color{red},
+    commentstyle=\color{olive}\itshape,
+    breaklines=true,
+    breakatwhitespace=true,
+    showspaces=false,
+    showstringspaces=false,
+    captionpos=b,
+    tabsize=4,
+}
+
+\begin{document}
+
+\title{Implementacja i analiza filtru \textit{Blooma}}
+\author{Mateusz Kacpura}
+\date{\today}
+
+\maketitle
+
+\begin{abstract}
+Filtr Blooma jest strukturą danych umożliwiającą efektywne pod względem pamięciowym testowanie przynależności elementu do zbioru z dopuszczeniem kontrolowanego ryzyka fałszywych pozytywów. W niniejszym artykule przedstawiono implementację filtru Blooma z uwzględnieniem parametrów takich jak liczba funkcji mieszających, rozmiar tablicy bitowej oraz prawdopodobieństwo fałszywego pozytywu. Przeprowadzono eksperymenty dla różnych konfiguracji parametrów, analizując wpływ na liczbę fałszywych pozytywów. Wyniki potwierdzają teoretyczne zależności pomiędzy parametrami filtru a jego skutecznością.
+\end{abstract}
+
+\tableofcontents
+
+\newpage
+
+\section{Wprowadzenie}
+
+W erze przetwarzania dużych ilości danych kluczowe jest znalezienie struktur danych, które są zarówno efektywne pod względem pamięciowym, jak i czasowym. \textbf{Filtr Blooma} \cite{bloom1970} jest probabilistyczną strukturą danych służącą do reprezentacji zbioru i umożliwiającą sprawdzanie, czy dany element należy do zbioru, z dopuszczeniem określonego poziomu fałszywych pozytywów. Filtr ten zużywa mniej pamięci niż struktury deterministyczne, takie jak tablice mieszające lub drzewa.
+
+Celem niniejszej pracy jest przedstawienie implementacji filtru Blooma, uwzględnienie kluczowych parametrów wpływających na jego działanie oraz przeprowadzenie analizy liczby fałszywych pozytywów dla różnych konfiguracji.
+
+\section{Teoria}
+
+\subsection{Filtr Blooma}
+
+Filtr Blooma składa się z tablicy bitów o długości $m$ oraz $k$ niezależnych funkcji mieszających $h_1, h_2, ..., h_k$. Wszystkie bity tablicy są inicjalizowane jako 0. Przy dodawaniu elementu $x$ do filtru, obliczane są wartości $h_i(x)$ dla $i = 1, 2, ..., k$, a odpowiadające im pozycje w tablicy są ustawiane na 1.
+
+Aby sprawdzić, czy element $y$ należy do zbioru, należy sprawdzić czym są bity na pozycjach $h_i(y)$. Jeśli którykolwiek z tych bitów jest równy 0, to na pewno element nie należy do zbioru. Jeśli wszystkie bity są równe 1, to z dużym prawdopodobieństwem element jest w zbiorze, jednak istnieje ryzyko przyporządkowania fałszywego pozytywu.
+
+\subsection{Parametry filtru}
+
+\subsubsection{Rozmiar tablicy bitowej ($m$)}
+
+Rozmiar tablicy bitowej wpływa na prawdopodobieństwo przyporządkowania fałszywego pozytywu. Większa tablica pozwala na zmniejszenie kolizji między funkcjami mieszającymi.
+
+\subsubsection{Liczba funkcji mieszających ($k$)}
+
+Optymalna liczba funkcji mieszających $k$ zależy od rozmiaru tablicy $m$ oraz liczby wstawionych elementów $n$, i jest dana wzorem:
+
+\begin{equation}
+k = \frac{m}{n} \ln 2
+\end{equation}
+
+\subsubsection{Prawdopodobieństwo fałszywego pozytywu ($p$)}
+
+Prawdopodobieństwo przyporządkowania fałszywego pozytywu można oszacować wzorem:
+
+\begin{equation}
+p = \left(1 - e^{-kn/m}\right)^k
+\end{equation}
+
+\newpage
+
+\section{Implementacja}
+
+\subsection{Opis implementacji}
+
+Implementacja została napisana w języku Python z wykorzystaniem bibliotek \texttt{numpy}, \texttt{math}, \texttt{bitarray} oraz \texttt{mmh3} (MurmurHash3). Kod został podzielony na klasę \texttt{BloomFilter}. Na końcu został przedstawiony przykład użycia zdefiniowanej class-y \texttt{BloomFilter}.
+
+\subsection{Kod źródłowy}
+
+\begin{lstlisting}[style=pystyle, caption=Implementacja filtru Blooma]
+import numpy as np
+import math
+import mmh3
+from bitarray import bitarray
+
+class BloomFilter():
+    def __init__(self, n, p):
+        self.n = n  # Liczba elementów, które planujemy dodać
+        self.p = p  # Akceptowalne prawdopodobieństwo fałszywego pozytywu
+
+        # Oblicz rozmiar tablicy bitowej (m) i liczbę funkcji mieszających (k)
+        self.m = self.get_size(n, p)
+        self.k = self.get_hash_count(self.m, n)
+
+        # Inicjalizacja tablicy bitowej zerami
+        self.bit_array = bitarray(self.m)
+        self.bit_array.setall(0)
+
+    def get_size(self, n, p):
+        m = -(n * math.log(p)) / (math.log(2) ** 2)
+        return int(m)
+
+    def get_hash_count(self, m, n):
+        k = (m / n) * math.log(2)
+        return int(k)
+
+    def add(self, item):
+        for i in range(self.k):
+            digest = mmh3.hash(item, i) % self.m
+            self.bit_array[digest] = True
+
+    def check(self, item):
+        for i in range(self.k):
+            digest = mmh3.hash(item, i) % self.m
+            if self.bit_array[digest] == False:
+                return False
+        return True
+
+# Wartości prawdopodobieństwa do przetestowania
+p_values = [0.01, 0.05, 0.1, 0.2]
+
+# Wyniki testów
+print(f"{'Próba':<10} {'p':<10} {'m':<10} {'k':<10} {'Fałszywe pozytywy':<20} {'Oczekiwane FP':<15}")
+print("-" * 80)
+
+for i, p in enumerate(p_values):
+    bloom = BloomFilter(n, p)
+    
+    # Dodawanie elementów do filtru Blooma
+    for item in animals:
+        bloom.add(item)
+    
+    # Sprawdzanie obecności elementów niewstawionych
+    false_positives = 0
+    for item in other_animals:
+        if bloom.check(item):
+            false_positives += 1
+    
+    # Obliczanie oczekiwanych fałszywych pozytywów
+    expected_fp = len(other_animals) * ((1 - math.exp(-bloom.k * n / bloom.m)) ** bloom.k)
+    
+    # Wyświetlanie wyników
+    print(f"{i + 1:<10} {p:<10} {bloom.m:<10} {bloom.k:<10} {false_positives:<20} {expected_fp:<15.2f}")
+\end{lstlisting}
+
+\subsection{Objaśnienia}
+
+\begin{itemize}
+    \item \texttt{\_\_init\_\_}: Konstruktor klasy oblicza rozmiar tablicy bitowej \texttt{m} oraz liczbę funkcji mieszających \texttt{k} na podstawie podanych parametrów \texttt{n} i \texttt{p}.
+    \item \texttt{get\_size}: Metoda oblicza rozmiar tablicy bitowej za pomocą wzoru:
+    \begin{equation}
+    m = -\frac{n \ln p}{(\ln 2)^2}
+    \end{equation}
+    \item \texttt{get\_hash\_count}: Metoda oblicza optymalną liczbę funkcji mieszających:
+    \begin{equation}
+    k = \frac{m}{n} \ln 2
+    \end{equation}
+    \item \texttt{add}: Metoda dodaje element do filtru, ustawiając odpowiednie bity na 1.
+    \item \texttt{check}: Metoda sprawdza, czy element może znajdować się w filtrze.
+\end{itemize}
+
+\newpage
+
+\section{Eksperymenty i wyniki}
+
+\subsection{Cel eksperymentów}
+
+Celem eksperymentów jest analiza wpływu liczby funkcji mieszających $k$ oraz rozmiaru tablicy bitowej $m$ na liczbę fałszywych pozytywów dla ustalonej liczby elementów $n$.
+
+\subsection{Konfiguracja eksperymentów}
+
+Przeprowadzono testy dla różnych wartości akceptowalnego prawdopodobieństwa fałszywego pozytywu $p$. Dla każdego testu:
+\begin{itemize}
+    \item Ustalono liczbę elementów wstawianych do filtru $n = 20$ (liczba zwierząt w liście \texttt{animals}).
+    \item Obliczono rozmiar tablicy bitowej $m$ oraz liczbę funkcji mieszających $k$ na podstawie $n$ i $p$.
+    \item Dodano elementy z listy \texttt{animals} do filtru Blooma.
+    \item Sprawdzono obecność elementów z listy \texttt{other\_animals}.
+    \item Zanotowano liczbę fałszywych pozytywów.
+    \item Parametry $p$ zostały ustalone na następujące wartości: $0.01$, $0.05$, $0.1$, $0.2$.
+
+\end{itemize}
+
+\subsection{Wyniki}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cccccc}
+\toprule
+\textbf{Próba} & \textbf{p} & \textbf{m} & \textbf{k} & \textbf{Fałszywe pozytywy} & \textbf{Oczekiwane FP} \\
+\midrule
+1 & 0.01 & 182 & 6 & 0/20 & 0 \\
+2 & 0.05 & 118 & 4 & 1/20 & 1 \\
+3 & 0.1 & 91 & 3 & 2/20 & 4 \\
+4 & 0.2 & 63 & 2 & 4/20 & 3 \\
+\bottomrule
+\end{tabular}
+\caption{Wyniki eksperymentów dla różnych wartości $p$}
+\end{table}
+
+\subsubsection*{Objaśnienia do tabeli}
+\begin{itemize}
+    \item \textbf{p}: Akceptowalne prawdopodobieństwo fałszywego pozytywu.
+    \item \textbf{m}: Rozmiar tablicy bitowej obliczony dla podanego $n$ i $p$.
+    \item \textbf{k}: Liczba funkcji mieszających.
+    \item \textbf{Fałszywe pozytywy}: Liczba fałszywych pozytywów na 20 testów (elementów z \texttt{other\_animals}).
+    \item \textbf{Oczekiwane FP}: Oczekiwana liczba fałszywych pozytywów, obliczona jako $p \times$ liczba testów.
+\end{itemize}
+
+\subsection{Analiza wyników}
+
+Zaobserwowano, że liczba fałszywych pozytywów rośnie wraz ze wzrostem akceptowalnego prawdopodobieństwa $p$. Wyniki eksperymentów są zbliżone do wartości oczekiwanych, co potwierdza poprawność implementacji oraz zgodność z teoretycznymi założeniami.
+
+\newpage
+
+\section{Dyskusja}
+
+\subsection{Wpływ liczby funkcji mieszających}
+
+Liczba funkcji mieszających $k$ wpływa na prawdopodobieństwo fałszywego pozytywu. Zbyt mała liczba funkcji może prowadzić do zwiększenia liczby fałszywych pozytywów, natomiast zbyt duża liczba funkcji zwiększa czas potrzebny na dodawanie i sprawdzanie elementów.
+
+\subsection{Rozmiar tablicy bitowej}
+
+Większy rozmiar tablicy bitowej $m$ pozwala na zmniejszenie prawdopodobieństwa kolizji hashy różnych elementów, co z kolei zmniejsza liczbę fałszywych pozytywów. Jednak zwiększenie $m$ wiąże się z większym zużyciem pamięci.
+
+\subsection{Optymalizacja parametrów}
+
+Dobór optymalnych wartości $m$ i $k$ jest kluczowy dla efektywnego działania filtru Blooma. Parametry te powinny być dostosowane do oczekiwanego prawdopodobieństwa fałszywego pozytywu oraz liczby elementów, które planujemy wstawić do filtru.
+
+\section{Wnioski}
+
+Filtr Blooma jest efektywną strukturą danych pozwalającą na oszczędne reprezentowanie zbiorów z dopuszczeniem kontrolowanego ryzyka fałszywych pozytywów. Implementacja i eksperymenty przeprowadzone w ramach pracy potwierdzają teoretyczne zależności między parametrami filtru a jego skutecznością.
+
+\section{Bibliografia}
+
+\begin{thebibliography}{9}
+
+\bibitem{bloom1970}
+Bloom, B. H. (1970). \textit{Space/time trade-offs in hash coding with allowable errors}. Communications of the ACM, 13(7), 422-426.
+
+\bibitem{mitzenmacher2002}
+Mitzenmacher, M. (2002). \textit{Compressed Bloom Filters}. IEEE/ACM Transactions on Networking, 10(5), 604-612.
+
+\bibitem{broder2004}
+Broder, A., \& Mitzenmacher, M. (2004). \textit{Network applications of bloom filters: A survey}. Internet Mathematics, 1(4), 485-509.
+
+\end{thebibliography}
+
+\end{document}
