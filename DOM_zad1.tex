@@ -1,0 +1,294 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[polish]{babel}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{float}
+
+\geometry{margin=1in}
+
+\lstdefinestyle{pystyle}{
+    language=Python,
+    inputencoding=utf8,
+    extendedchars=true,
+    literate={ą}{{\k{a}}}1 {ć}{{\'c}}1 {ę}{{\k{e}}}1 {ł}{{\l{}}}1 {ń}{{\'n}}1 {ó}{{\'o}}1 {ś}{{\'s}}1 {ż}{{\.z}}1 {ź}{{\'z}}1,
+    basicstyle=\ttfamily\small,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{red},
+    commentstyle=\color{olive}\itshape,
+    breaklines=true,
+    breakatwhitespace=true,
+    showspaces=false,
+    showstringspaces=false,
+    captionpos=b,
+    tabsize=4,
+}
+
+\title{Implementacja operacji relacyjnych w Apache Spark z wykorzystaniem MapReduce}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  W niniejszym dokumencie przedstawiono implementację podstawowych operacji relacyjnych w środowisku Apache Spark z wykorzystaniem modelu MapReduce. Analizie poddano zbiory danych z plików \texttt{relation.txt} i \texttt{join.txt}. Zaprezentowano procesy przetwarzania i wyniki operacji takich jak suma zbiorów, część wspólna oraz złączenia relacji, wzbogacone o odpowiednie fragmenty kodu w języku Python.
+\end{abstract}
+
+\tableofcontents
+
+\section{Wstęp}
+
+Przetwarzanie dużych zbiorów danych wymaga wydajnych i skalowalnych narzędzi. Apache Spark, oparty na modelu MapReduce, umożliwia efektywne wykonywanie operacji na danych rozproszonych. W niniejszym dokumencie skupimy się na implementacji podstawowych operacji relacyjnych z użyciem Spark, ilustrując procesy na przykładach.
+
+\section{Operacje na zbiorach z pliku \texttt{relation.txt}}
+
+Plik \texttt{relation.txt} zawiera pary składające się z nazwy relacji (\(A\) lub \(B\)) oraz wartości liczbowej. Celem jest wykonanie podstawowych operacji na zbiorach:
+
+\begin{itemize}
+    \item Suma zbiorów \(A \cup B\)
+    \item Część wspólna zbiorów \(A \cap B\)
+    \item Różnica zbiorów \(A - B\) oraz \(B - A\)
+\end{itemize}
+
+\subsection{Tworzenie zbiorów \(A\) i \(B\)}
+
+Z pliku \texttt{relation.txt} wyodrębniamy wartości przypisane do relacji \(A\) i \(B\):
+
+\[
+A = \{0, 1, 4, 8, 9, 10, 17, \dots, 98\}
+\]
+\[
+B = \{0, 2, 3, 5, 8, 9, 10, \dots, 99\}
+\]
+
+\subsection{Implementacja w Apache Spark}
+
+Poniżej przedstawiono implementację powyższych operacji z wykorzystaniem języka Python i biblioteki PySpark.
+
+\begin{lstlisting}[style=pystyle, caption=Przetwarzanie pliku \texttt{relation.txt}]
+from pyspark import SparkContext
+
+sc = SparkContext.getOrCreate()
+data = sc.textFile('relation.txt')
+
+# Mapowanie każdej linii na parę (RelationName, Value)
+lines = data.map(lambda line: line.strip().split())
+
+# Utworzenie RDD dla relacji A i B
+rddA = lines.filter(lambda x: x[0] == 'A').map(lambda x: int(x[1]))
+rddB = lines.filter(lambda x: x[0] == 'B').map(lambda x: int(x[1]))
+
+# Mapowanie elementów w A i B do par (Value, RelationName)
+mapA = rddA.map(lambda x: (x, 'A'))
+mapB = rddB.map(lambda x: (x, 'B'))
+
+# Połączenie zmapowanych RDD
+unionMap = mapA.union(mapB)
+
+# Grupowanie po kluczu (Value)
+grouped = unionMap.groupByKey().mapValues(list)
+
+# Operacje na zbiorach
+unionValues = grouped.map(lambda x: x[0])  # Suma zbiorów A i B
+intersectionValues = grouped.filter(lambda x: 'A' in x[1] and 'B' in x[1]).map(lambda x: x[0])  # A ∩ B
+differenceAB = grouped.filter(lambda x: 'A' in x[1] and 'B' not in x[1]).map(lambda x: x[0])  # A - B
+differenceBA = grouped.filter(lambda x: 'B' in x[1] and 'A' not in x[1]).map(lambda x: x[0])  # B - A
+
+# Zbieranie i wyświetlanie wyników
+print("Suma zbiorów A i B:")
+print(unionValues.collect())
+
+print("\nCzęść wspólna A i B:")
+print(intersectionValues.collect())
+
+print("\nRóżnica A - B:")
+print(differenceAB.collect())
+
+print("\nRóżnica B - A:")
+print(differenceBA.collect())
+\end{lstlisting}
+
+\subsection{Wyniki operacji}
+
+Na podstawie powyższego kodu otrzymujemy następujące wyniki:
+
+\begin{itemize}
+    \item \textbf{Suma zbiorów \(A \cup B\)}:
+    \[
+    A \cup B = \{0, 1, 2, 3, 4, 5, \dots, 99\}
+    \]
+    \item \textbf{Część wspólna zbiorów \(A \cap B\)}:
+    \[
+    A \cap B = \{0, 8, 9, 10, 17, \dots, 98\}
+    \]
+    \item \textbf{Różnica zbiorów \(A - B\)}:
+    \[
+    A - B = \{1, 4, 18, \dots, 96\}
+    \]
+    \item \textbf{Różnica zbiorów \(B - A\)}:
+    \[
+    B - A = \{2, 3, 5, \dots, 99\}
+    \]
+\end{itemize}
+
+\section{Złączenie relacji z pliku \texttt{join.txt}}
+
+\subsection{Opis problemu}
+
+Celem jest wykonanie złączenia (\emph{join}) między relacjami \texttt{Customers} i \texttt{Orders} na podstawie wspólnego atrybutu \texttt{CustomerID}, wykorzystując model MapReduce.
+
+\subsection{Dane wejściowe}
+
+\paragraph{Klienci (\texttt{Customers}):} 
+\paragraph{}
+
+\begin{table}[H]
+\begin{tabular}{l p{10cm}}
+\textbf{CustomerID} & \textbf{Informacje o kliencie} \\
+\hline
+1 & \textbf{CompanyName}: Alfreds Futterkiste, \textbf{ContactName}: Maria Anders, \textbf{Country}: Germany \\
+2 & \textbf{CompanyName}: Ana Trujillo Emparedados y helados, \textbf{ContactName}: Ana Trujillo, \textbf{Country}: Mexico \\
+3 & \textbf{CompanyName}: Antonio Moreno Taquería, \textbf{ContactName}: Antonio Moreno, \textbf{Country}: Mexico \\
+4 & \textbf{CompanyName}: NO ORDERS, \textbf{ContactName}: NO ORDERS, \textbf{Country}: NO ORDERS \\
+\end{tabular}
+\end{table}
+
+\paragraph{Zamówienia (\texttt{Orders}):} 
+\paragraph{} 
+
+\begin{table}[H]
+\begin{tabular}{l l}
+\textbf{OrderID, CustomerID} & \textbf{OrderDate} \\
+\hline
+10308, 1 & '2016-09-18' \\
+10309, 2 & '2016-09-19' \\
+10310, 3 & '2016-09-20' \\
+10311, 3 & '2016-09-20' \\
+10312, 3 & '2016-09-20' \\
+10313, 5 & '2016-09-20' \\
+\end{tabular}
+\end{table}
+
+\newpage
+
+\subsection{Implementacja w Apache Spark}
+
+\begin{lstlisting}[style=pystyle, caption=Złączenie relacji z pliku \texttt{join.txt}]
+# Wczytanie danych z pliku join.txt
+order_data = sc.textFile('join.txt')
+# Podzielenie każdej linii na pola
+order_lines = order_data.map(lambda line: line.strip().split('\t'))
+# Funkcja przetwarzająca każdą linię i mapująca ją na parę (CustomerID, Record)
+def process_order_line(line):
+    if line[0] == 'Orders':
+        # Mapowanie Orders na (CustomerID, ('Orders', OrderID, OrderDate))
+        return (line[2], ('Orders', line[1], line[3]))
+    elif line[0] == 'Customers':
+        # Mapowanie Customers na (CustomerID, ('Customers', CompanyName, ContactName, Country))
+        return (line[1], ('Customers', line[2], line[3], line[4]))
+    else:
+        return None
+
+# Mapowanie linii i filtrowanie wartości None
+order_mapped = order_lines.map(process_order_line).filter(lambda x: x is not None)
+# Grupowanie po CustomerID
+order_grouped = order_mapped.groupByKey().mapValues(list)
+# Funkcja łącząca informacje o kliencie z zamówieniami
+def join_orders(customers_orders):
+    customer_id, records = customers_orders
+    customer_info = None
+    orders = []
+    for record in records:
+        if record[0] == 'Customers':
+            customer_info = record  # ('Customers', CompanyName, ContactName, Country)
+        elif record[0] == 'Orders':
+            orders.append(record)  # ('Orders', OrderID, OrderDate)
+    # Jeśli są dostępne informacje o kliencie, połącz z każdym zamówieniem
+    if customer_info:
+        return [
+            (customer_id, customer_info[1:], order[1:])
+            for order in orders
+        ]
+    else:
+        # Brak informacji o kliencie, nie można wykonać złączenia
+        return []
+
+# Wykonanie operacji złączenia
+joined_orders = order_grouped.flatMap(join_orders)
+# Zbieranie i wyświetlanie wyników
+print("\nPołączone zamówienia i klienci:")
+for record in joined_orders.collect():
+    customer_id = record[0]
+    company_name, contact_name, country = record[1]
+    order_id, order_date = record[2]
+    print(f"CustomerID: {customer_id}, CompanyName: {company_name}, "
+          f"ContactName: {contact_name}, Country: {country}, "
+          f"OrderID: {order_id}, OrderDate: {order_date}")
+\end{lstlisting}
+
+\subsection{Wyniki złączenia}
+
+W wyniku wykonania powyższego kodu otrzymujemy następujące połączone rekordy:
+
+\begin{itemize}
+    \item \textbf{CustomerID}: 1
+    \begin{itemize}
+        \item \textbf{CompanyName}: Alfreds Futterkiste
+        \item \textbf{ContactName}: Maria Anders
+        \item \textbf{Country}: Germany
+        \item \textbf{OrderID}: 10308
+        \item \textbf{OrderDate}: 2016-09-18
+    \end{itemize}
+    \item \textbf{CustomerID}: 2
+    \begin{itemize}
+        \item \textbf{CompanyName}: Ana Trujillo Emparedados y helados
+        \item \textbf{ContactName}: Ana Trujillo
+        \item \textbf{Country}: Mexico
+        \item \textbf{OrderID}: 10309
+        \item \textbf{OrderDate}: 2016-09-19
+    \end{itemize}
+    \item \textbf{CustomerID}: 3 (trzykrotnie dla różnych zamówień)
+    \begin{itemize}
+        \item \textbf{CompanyName}: Antonio Moreno Taquería
+        \item \textbf{ContactName}: Antonio Moreno
+        \item \textbf{Country}: Mexico
+        \item \textbf{OrderID}: 10310, 10311, 10312
+        \item \textbf{OrderDate}: 2016-09-20
+    \end{itemize}
+\end{itemize}
+
+\subsection{Analiza wyników}
+
+\begin{itemize}
+    \item Klient o \texttt{CustomerID} = 4 nie posiada zamówień, w związku z czym nie został uwzględniony w wynikach złączenia.
+    \item Zamówienie o \texttt{OrderID} = 10313 z \texttt{CustomerID} = 5 nie zostało uwzględnione, ponieważ brak jest informacji o kliencie o \texttt{CustomerID} = 5 w relacji \texttt{Customers}.
+    \item Operacja złączenia działa jako \emph{inner join}, łącząc tylko te rekordy, dla których klucz \texttt{CustomerID} występuje w obu relacjach.
+\end{itemize}
+
+\section{Wnioski}
+
+Zaprezentowane implementacje podstawowych operacji relacyjnych w środowisku Apache Spark pokazują efektywność modelu MapReduce w przetwarzaniu dużych zbiorów danych. Wykorzystanie RDD (Resilient Distributed Datasets) umożliwia łatwe i skalowalne operacje na danych, co jest kluczowe w analizie big data.
+
+\begin{thebibliography}{9}
+\bibitem{spark}
+Apache Spark --
+\emph{https://spark.apache.org/}
+
+\bibitem{mapreduce}
+J. Dean and S. Ghemawat,
+\emph{MapReduce: Simplified Data Processing on Large Clusters},
+Communications of the ACM, 51(1):107-113, 2008.
+
+\end{thebibliography}
+
+\end{document}
