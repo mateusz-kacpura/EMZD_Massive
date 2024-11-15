@@ -1,0 +1,241 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[polish]{babel}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{float}
+
+\geometry{margin=1in}
+
+\lstdefinestyle{pystyle}{
+    language=Python,
+    inputencoding=utf8,
+    extendedchars=true,
+    literate={ą}{{\k{a}}}1 {ć}{{\'c}}1 {ę}{{\k{e}}}1 {ł}{{\l{}}}1 {ń}{{\'n}}1 {ó}{{\'o}}1 {ś}{{\'s}}1 {ż}{{\.z}}1 {ź}{{\'z}}1,
+    basicstyle=\ttfamily\small,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{red},
+    commentstyle=\color{olive}\itshape,
+    breaklines=true,
+    breakatwhitespace=true,
+    showspaces=false,
+    showstringspaces=false,
+    captionpos=b,
+    tabsize=4,
+}
+
+\begin{document}
+
+\title{Analiza średniej liczby powtórzonych zapytań przez użytkownika na podstawie sumulowanego strumienia danych}
+\author{Mateusz Kacpura}
+\date{\today}
+
+\maketitle
+
+\tableofcontents
+
+\newpage
+
+\section{Wstęp}
+
+Celem niniejszego sprawozdania jest analiza średniej liczby powtórzonych zapytań przez użytkownika w ciągu tego samego dnia. Ze względu na ograniczenia pamięciowe (możemy przechowywać jedynie $10\%$ strumienia danych), zastosowano próbkowanie proporcjonalne w dwóch implementacjach:
+
+\begin{itemize}
+    \item implementacja naiwna,
+    \item implementacja z hashowaniem dla klucza \textit{użytkownik}.
+\end{itemize}
+
+Przeprowadzono testy na rzeczywistych danych, które zostały wczytane z pliku tekstowego. W sprawozdaniu przedstawiono kod w języku Python, omówiono metody oraz zaprezentowano otrzymane wyniki.
+
+\section{Dane}
+
+Analizowane dane pochodzą z pliku \texttt{log.txt} i zawierają wiersze w formacie:
+
+\begin{verbatim}
+Adres_IP Zapytanie
+\end{verbatim}
+
+Przykładowa linia z pliku:
+
+\begin{verbatim}
+89.113.36.135 http://www.gingiva.coop
+\end{verbatim}
+
+Dla celów analizy przyjęto, że dane te reprezentują strumień krotek \texttt{(użytkownik, zapytanie)}.
+
+\section{Metody}
+
+\subsection{Opis funkcji}
+
+W celu przeprowadzenia analizy zaimplementowano następujące funkcje w języku Python:
+
+\subsubsection{\texttt{load\_data\_from\_file}}
+
+Funkcja \texttt{load\_data\_from\_file} wczytuje dane z pliku tekstowego i zwraca listę krotek \texttt{(użytkownik, zapytanie)}.
+
+\begin{lstlisting}[style=pystyle, caption=Funkcja \texttt{load\_data\_from\_file}]
+import random
+from collections import defaultdict
+
+# Funkcja wczytująca dane z pliku
+def load_data_from_file(filename):
+    sample_data = []
+    with open(filename, 'r') as file:
+        for line in file:
+            # Podział linii na użytkownika i zapytanie
+            parts = line.strip().split()
+            if len(parts) == 2:
+                user, query = parts
+                sample_data.append((user, query))
+    return sample_data
+\end{lstlisting}
+
+\subsubsection{\texttt{simulate\_data}}
+
+Funkcja \texttt{simulate\_data} symuluje strumień zapytań na podstawie wczytanych danych. Dla każdego użytkownika generuje losową liczbę zapytań (od 1 do 10), które mogą się powtarzać.
+
+\begin{lstlisting}[style=pystyle, caption=Funkcja \texttt{simulate\_data}]
+# Symulacja strumienia zapytań na podstawie przykładowych danych
+def simulate_data(sample_data):
+    simulated_stream = []
+    for user, query in sample_data:
+        num_queries = random.randint(1, 10)  # Liczba zapytań od 1 do 10
+        queries = [random.choice(sample_data)[1] for _ in range(num_queries)]
+        for q in queries:
+            simulated_stream.append((user, q))
+    return simulated_stream
+\end{lstlisting}
+
+\subsubsection{\texttt{naive\_sampling}}
+
+Implementacja naiwnego próbkowania proporcjonalnego, gdzie każdy rekord jest wybierany z prawdopodobieństwem $p$.
+
+\begin{lstlisting}[style=pystyle, caption=Funkcja \texttt{naive\_sampling}]
+# Naiwne próbkowanie: losowe próbkowanie par użytkownik-zapytanie z prawdopodobieństwem p
+def naive_sampling(stream, p=0.1):
+    sample = [entry for entry in stream if random.random() < p]
+    return sample
+\end{lstlisting}
+
+\subsubsection{\texttt{hash\_sampling}}
+
+Implementacja próbkowania z hashowaniem klucza \textit{użytkownik}. Dzięki temu wszystkie zapytania wybranych użytkowników są uwzględniane.
+
+\begin{lstlisting}[style=pystyle, caption=Funkcja \texttt{hash\_sampling}]
+# Hashowe próbkowanie: próbkowanie par użytkownik-zapytanie na podstawie shashowanego ID użytkownika
+def hash_sampling(stream, p=0.1):
+    sample = []
+    users = set()
+    for user, _ in stream:
+        users.add(user)
+    
+    # Próbkowanie użytkowników na podstawie funkcji hash
+    sampled_users = {user for user in users if (hash(user) % 1000) < p * 1000}
+    sample = [(user, query) for user, query in stream if user in sampled_users]
+    
+    return sample
+\end{lstlisting}
+
+\newpage
+
+\subsubsection{\texttt{compute\_average\_repeats}}
+
+Funkcja oblicza średnią liczbę powtórzonych zapytań na użytkownika.
+
+\begin{lstlisting}[style=pystyle, caption=Funkcja \texttt{compute\_average\_repeats}]
+# Obliczanie średniej liczby powtórzonych zapytań na użytkownika
+def compute_average_repeats(sample):
+    user_queries = defaultdict(list)
+    
+    # Grupowanie zapytań według użytkownika
+    for user, query in sample:
+        user_queries[user].append(query)
+    
+    total_repeats = 0
+    total_users = len(user_queries)
+    
+    # Zliczanie powtórzonych zapytań dla każdego użytkownika
+    for queries in user_queries.values():
+        total_queries = len(queries)
+        unique_queries = len(set(queries))
+        repeats = total_queries - unique_queries
+        total_repeats += repeats
+    
+    # Obliczenie średniej
+    average_repeats_per_user = total_repeats / total_users if total_users > 0 else 0
+    return average_repeats_per_user
+\end{lstlisting}
+
+\subsubsection{Główna część programu}
+
+Poniższy kod stanowi główną część programu, który wykorzystuje powyższe funkcje do analizy danych z pliku \texttt{log.txt}.
+
+\begin{lstlisting}[style=pystyle, caption=Główna część programu]
+# Wczytanie danych z pliku log.txt
+sample_data = load_data_from_file('log.txt')
+
+# Symulacja strumienia zapytań
+simulated_stream = simulate_data(sample_data)
+
+# Naiwne próbkowanie
+naive_sample = naive_sampling(simulated_stream, p=0.1)
+naive_average_repeats = compute_average_repeats(naive_sample)
+
+# Hashowe próbkowanie
+hash_sample = hash_sampling(simulated_stream, p=0.1)
+hash_average_repeats = compute_average_repeats(hash_sample)
+
+# Wyświetlenie wyników
+print(f"Średnia liczba powtórzonych zapytań na użytkownika (naiwne próbkowanie): {naive_average_repeats}")
+print(f"Średnia liczba powtórzonych zapytań na użytkownika (hashowe próbkowanie): {hash_average_repeats}")
+\end{lstlisting}
+
+\newpage
+
+\section{Wyniki}
+
+Uruchomienie powyższego kodu na rzeczywistych danych z pliku \texttt{log.txt} dało następujące wyniki:
+
+\begin{verbatim}
+Średnia liczba powtórzonych zapytań na użytkownika (naiwne próbkowanie): 142.761
+Średnia liczba powtórzonych zapytań na użytkownika (hashowe próbkowanie): 9077.836
+\end{verbatim}
+
+\section{Dyskusja}
+
+Z otrzymanych wyników wynika, że średnia liczba powtórzonych zapytań na użytkownika jest znacznie wyższa w przypadku hashowego próbkowania niż w przypadku naiwnego próbkowania. Przyczyną tego jest sposób, w jaki obie metody traktują dane użytkowników:
+
+\begin{itemize}
+    \item \textbf{Naiwne próbkowanie}: Każda para \texttt{(użytkownik, zapytanie)} jest próbkowana niezależnie z prawdopodobieństwem $p=0.1$. W rezultacie, dla danego użytkownika w próbie mogą znaleźć się tylko niektóre z jego zapytań, co prowadzi do mniejszej liczby powtórzeń i potencjalnie zaniżonej średniej liczby powtórzonych zapytań.
+    \item \textbf{Hashowe próbkowanie}: Użytkownicy są próbkowani na podstawie wartości funkcji hash ich identyfikatora. Jeśli użytkownik zostanie wybrany, to wszystkie jego zapytania zostają uwzględnione w próbie. Dzięki temu zachowana jest kompletność danych dla wybranych użytkowników, co prowadzi do większej liczby powtórzonych zapytań i wyższej średniej.
+\end{itemize}
+
+Istotne jest również zwrócenie uwagi na generowanie danych w funkcji \texttt{simulate\_data}. W tej funkcji dla każdego użytkownika przypisujemy losową liczbę zapytań, które są losowo wybierane z puli wszystkich zapytań. Może to prowadzić do powtórzeń, zwłaszcza przy ograniczonej liczbie unikalnych zapytań.
+
+\section{Wnioski}
+
+Przeprowadzona analiza wykazała, że metoda próbkowania z hashowaniem klucza \textit{użytkownik} dostarcza dokładniejsze oszacowanie średniej liczby powtórzonych zapytań na użytkownika w ciągu dnia w porównaniu z naiwnym próbkowaniem. Dzieje się tak, ponieważ hashowe próbkowanie zachowuje pełne informacje o aktywności wybranych użytkowników, co jest kluczowe przy analizie wzorców zachowań.
+
+W praktycznych zastosowaniach, gdzie istotne jest dokładne modelowanie aktywności użytkowników przy ograniczonych zasobach pamięciowych, zaleca się wykorzystanie metod opartych na hashowaniu kluczy identyfikujących użytkowników.
+
+\section{Bibliografia}
+
+\begin{thebibliography}{9}
+
+\bibitem{streaming}
+Muthukrishnan, S. (2005). \textit{Data streams: Algorithms and applications}. Now Publishers Inc.
+
+\bibitem{sampling}
+Leskovec, J., Rajaraman, A., \& Ullman, J. D. (2014). \textit{Mining of Massive Datasets}. Cambridge University Press.
+
+\end{thebibliography}
+
+\end{document}
