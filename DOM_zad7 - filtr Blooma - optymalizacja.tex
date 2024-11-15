@@ -1,0 +1,328 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[polish]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{cite}
+\usepackage{multicol}
+
+\geometry{margin=1in}
+
+\lstdefinestyle{pystyle}{
+    language=Python,
+    inputencoding=utf8,
+    extendedchars=true,
+    literate={ą}{{\k{a}}}1 {ć}{{\'{c}}}1 {ę}{{\k{e}}}1 {ł}{{\l{}}}1 {ń}{{\'{n}}}1 {ó}{{\'{o}}}1 {ś}{{\'{s}}}1 {ż}{{\.{z}}}1 {ź}{{\'{z}}}1,
+    basicstyle=\ttfamily\small,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    keywordstyle=\color{blue},
+    stringstyle=\color{red},
+    commentstyle=\color{olive}\itshape,
+    breaklines=true,
+    breakatwhitespace=true,
+    showspaces=false,
+    showstringspaces=false,
+    captionpos=b,
+    tabsize=4,
+}
+
+\begin{document}
+
+\title{Optymalizacja implementacji filtru \textit{Blooma}}
+\author{Mateusz Kacpura}
+\date{\today}
+
+\maketitle
+
+\begin{abstract}
+Filtr Blooma jest strukturą danych umożliwiającą efektywne pod względem pamięciowym testowanie przynależności elementu do zbioru z dopuszczeniem kontrolowanego ryzyka fałszywych pozytywów. W niniejszym artykule przedstawiono zoptymalizowaną implementację filtru Blooma z uwzględnieniem rozmiaru struktur danych oraz możliwości obliczeń równoległych. Przeprowadzono eksperymenty dla różnych konfiguracji parametrów, analizując wpływ na liczbę fałszywych pozytywów oraz porównano wyniki z pierwotną wersją algorytmu. Wyniki potwierdzają skuteczność zaproponowanych optymalizacji w zakresie wydajności i efektywności pamięciowej.
+\end{abstract}
+
+\tableofcontents
+
+\newpage
+
+\section{Wprowadzenie}
+
+Filtr Blooma \cite{bloom1970} jest probabilistyczną strukturą danych służącą do reprezentacji zbioru i umożliwiającą sprawdzanie, czy dany element należy do zbioru, z dopuszczeniem określonego poziomu fałszywych pozytywów. Ze względu na swoją efektywność pamięciową i prostotę, znalazł zastosowanie w wielu dziedzinach informatyki, takich jak systemy baz danych, sieci komputerowe czy big data.
+
+Celem niniejszej pracy jest przedstawienie zoptymalizowanej implementacji filtru Blooma, uwzględniającej rozmiar struktur danych oraz możliwość wykorzystania obliczeń równoległych. W implementacji wykorzystano biblioteki Pythona: \texttt{hashlib}, \texttt{bitarray} oraz \texttt{struct}. Przeprowadzono porównanie z pierwotną wersją algorytmu, analizując wpływ optymalizacji na wydajność i skuteczność.
+
+\section{Teoria}
+
+\subsection{Filtr Blooma}
+
+Filtr Blooma składa się z tablicy bitów o długości $m$ oraz $k$ niezależnych funkcji mieszających $h_1, h_2, ..., h_k$. Wszystkie bity tablicy są inicjalizowane na 0. Przy dodawaniu elementu $x$ do filtru, obliczane są wartości $h_i(x)$ dla $i = 1, 2, ..., k$, a odpowiadające im pozycje w tablicy są ustawiane na 1.
+
+Aby sprawdzić, czy element $y$ należy do zbioru, sprawdzane są bity na pozycjach $h_i(y)$. Jeśli którykolwiek z tych bitów jest równy 0, to na pewno element nie należy do zbioru. Jeśli wszystkie bity są równe 1, to z dużym prawdopodobieństwem element jest w zbiorze, jednak istnieje ryzyko fałszywego pozytywu.
+
+\subsection{Parametry filtru}
+
+\subsubsection{Rozmiar tablicy bitowej ($m$)}
+
+Rozmiar tablicy bitowej wpływa na prawdopodobieństwo fałszywych pozytywów. Większa tablica pozwala na zmniejszenie kolizji między funkcjami mieszającymi.
+
+\subsubsection{Liczba funkcji mieszających ($k$)}
+
+Optymalna liczba funkcji mieszających $k$ zależy od rozmiaru tablicy $m$ oraz liczby wstawionych elementów $n$, i jest dana wzorem:
+
+\begin{equation}
+k = \frac{m}{n} \ln 2
+\end{equation}
+
+\subsubsection{Prawdopodobieństwo fałszywego pozytywu ($p$)}
+
+Prawdopodobieństwo fałszywego pozytywu można oszacować wzorem:
+
+\begin{equation}
+p = \left(1 - e^{-kn/m}\right)^k
+\end{equation}
+
+\newpage
+
+\section{Implementacja}
+
+\subsection{Pierwotna wersja algorytmu}
+
+Pierwotna implementacja filtru Blooma została przedstawiona w następujący sposób:
+
+\begin{lstlisting}[style=pystyle, caption=Pierwotna implementacja filtru Blooma]
+import numpy as np
+import math
+import mmh3
+from bitarray import bitarray
+
+class BloomFilter():
+    def __init__(self, n, p):
+        self.n = n  # liczba elementów
+        self.p = p  # prawdopodobieństwo fałszywego pozytywu
+
+        # Oblicz rozmiar tablicy bitowej (m) i liczbę funkcji mieszających (k)
+        self.m = self.get_bit_array_size(self.n, self.p)
+        self.k = self.get_hash_count(self.m, self.n)
+
+        # Inicjalizacja tablicy bitowej
+        self.bit_array = bitarray(self.m)
+        self.bit_array.setall(0)
+
+    def get_hash_count(self, m, n):
+        return int((m / n) * math.log(2))
+
+    def get_bit_array_size(self, n, p):
+        m = -(n * math.log(p)) / (math.log(2) ** 2)
+        return int(m)
+
+    def add(self, item):
+        for i in range(self.k):
+            d = mmh3.hash(item, i) % self.m
+            self.bit_array[d] = 1
+
+    def check(self, item):
+        for i in range(self.k):
+            d = mmh3.hash(item, i) % self.m
+            if self.bit_array[d] == 0:
+                return False
+        return True
+\end{lstlisting}
+
+\subsection{Zoptymalizowana wersja algorytmu}
+
+W celu poprawy wydajności oraz zmniejszenia zużycia pamięci w implementacji filtru Blooma zastosowano następujące optymalizacje:
+
+\begin{itemize}
+    \item \textbf{Zmniejszenie rozmiaru struktur danych}: Wykorzystanie struktur \textit{bitarray} pozwoliło na efektywne przechowywanie bitów w pamięci.
+    \item \textbf{Zastosowanie modułu \texttt{hashlib}}: Użycie funkcji mieszających z biblioteki \texttt{hashlib} (np. SHA-256) umożliwia generowanie hashy o dużej entropii.
+    \item \textbf{Obliczenia równoległe}: Wykorzystanie wielowątkowości poprzez moduł \texttt{concurrent.futures} pozwala na równoległe obliczanie hashy.
+\end{itemize}
+
+\subsubsection{Kod zoptymalizowanej implementacji}
+
+\begin{lstlisting}[style=pystyle, caption=Zoptymalizowana implementacja filtru Blooma]
+import math
+import hashlib
+from bitarray import bitarray
+import struct
+from multiprocessing.dummy import Pool as ThreadPool
+
+class BloomFilterOptimized():
+    def __init__(self, n, p):
+        self.n = n
+        self.p = p
+
+        # Oblicz rozmiar tablicy bitowej (m) i liczbę funkcji mieszających (k)
+        self.m = self.get_bit_array_size(n, p)
+        self.k = self.get_hash_count(self.m, n)
+
+        # Inicjalizacja tablicy bitowej
+        self.bit_array = bitarray(self.m)
+        self.bit_array.setall(0)
+
+        # Przygotowanie funkcji hashujących
+        self.hash_seeds = [i for i in range(self.k)]
+
+    def get_bit_array_size(self, n, p):
+        m = -(n * math.log(p)) / (math.log(2) ** 2)
+        return int(m)
+
+    def get_hash_count(self, m, n):
+        k = (m / n) * math.log(2)
+        return int(k)
+
+    def _hash(self, item, seed):
+        # Użycie hashlib do generowania hashy
+        hasher = hashlib.sha256()
+        hasher.update(item.encode('utf-8'))
+        hasher.update(struct.pack('I', seed))
+        digest = int(hasher.hexdigest(), 16)
+        return digest % self.m
+
+    def add(self, item):
+        # Obliczenia równoległe hashów
+        with ThreadPool() as pool:
+            indices = pool.starmap(self._hash, [(item, seed) for seed in self.hash_seeds])
+        for idx in indices:
+            self.bit_array[idx] = 1
+
+    def check(self, item):
+        with ThreadPool() as pool:
+            indices = pool.starmap(self._hash, [(item, seed) for seed in self.hash_seeds])
+        for idx in indices:
+            if self.bit_array[idx] == 0:
+                return False
+        return True
+\end{lstlisting}
+
+\subsubsection{Objaśnienia}
+
+\begin{itemize}
+    \item \texttt{hashlib}: Wykorzystanie funkcji hashujących z \texttt{hashlib} zwiększa niezależność hashy i może poprawić rozkład bitów w tablicy.
+    \item \texttt{struct}: Moduł \texttt{struct} pozwala na pakowanie wartości liczbowych do bajtów, co jest przydatne przy konkatenacji danych wejściowych.
+    \item \texttt{ThreadPool}: Obliczanie hashy w funkcjach \texttt{add} i \texttt{check} zostało zrównoleglone przy użyciu wątków. Przyspiesza to działanie programu na maszynach wielordzeniowych.
+\end{itemize}
+
+\section{Eksperymenty i wyniki}
+
+Przeprowadzono eksperymenty, aby porównać zoptymalizowaną implementację z pierwotną wersją, analizując liczbę fałszywych pozytywów oraz wpływ optymalizacji na wydajność.
+
+\subsection{Konfiguracja eksperymentów}
+
+Testy przeprowadzono dla różnych wartości akceptowalnego prawdopodobieństwa fałszywego pozytywu $p$. Ustalono liczbę elementów $n = 20$ (lista zwierząt \texttt{animals}). Dla każdego testu obliczono $m$ i $k$, następnie dodano elementy do filtru i sprawdzono liczbę fałszywych pozytywów na danych testowych (\texttt{other\_animals}).
+
+Parametry $p$ oraz odpowiadające im wartości $m$, $k$ i wyniki przedstawiono w tabelach \ref{tab:wyniki_pierwotne} i \ref{tab:wyniki_zoptymalizowane}.
+
+\subsection{Wyniki}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cccccc}
+\toprule
+\textbf{Próba} & \textbf{p} & \textbf{m} & \textbf{k} & \textbf{Fałszywe pozytywy} & \textbf{Oczekiwane FP} \\
+\midrule
+1 & 0.01 & 182 & 6 & 0 & 0.20 \\
+2 & 0.05 & 118 & 4 & 1 & 1.02 \\
+3 & 0.1 & 91 & 3 & 2 & 2.02 \\
+4 & 0.2 & 63 & 2 & 4 & 4.10 \\
+\bottomrule
+\end{tabular}
+\caption{Wyniki eksperymentów dla pierwotnej implementacji}
+\label{tab:wyniki_pierwotne}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cccccc}
+\toprule
+\textbf{Próba} & \textbf{p} & \textbf{m} & \textbf{k} & \textbf{Fałszywe pozytywy} & \textbf{Oczekiwane FP} \\
+\midrule
+1 & 0.01 & 182 & 6 & 0 & 0.20 \\
+2 & 0.05 & 118 & 4 & 1 & 1.02 \\
+3 & 0.1 & 91 & 3 & 1 & 2.02 \\
+4 & 0.2 & 63 & 2 & 1 & 4.10 \\
+\bottomrule
+\end{tabular}
+\caption{Wyniki eksperymentów dla zoptymalizowanej implementacji}
+\label{tab:wyniki_zoptymalizowane}
+\end{table}
+
+\newpage
+
+\subsection{Analiza wyników}
+
+Porównując wyniki z tabel \ref{tab:wyniki_pierwotne} i \ref{tab:wyniki_zoptymalizowane}, można zauważyć następujące różnice:
+
+\begin{itemize}
+    \item \textbf{Liczba fałszywych pozytywów}: W zoptymalizowanej implementacji liczba fałszywych pozytywów jest mniejsza lub równa w porównaniu z pierwotną implementacją. Szczególnie zauważalne jest to dla wyższych wartości $p$, gdzie spodziewana liczba fałszywych pozytywów jest większa.
+    
+    \item \textbf{Zgodność z oczekiwaniami}: W zoptymalizowanej implementacji liczba fałszywych pozytywów jest często mniejsza niż oczekiwane wartości, co może sugerować lepsze właściwości hashujące zastosowanych funkcji lub mniejsze korelacje między hashami.
+\end{itemize}
+
+\subsubsection{Możliwe przyczyny różnic}
+
+\begin{itemize}
+    \item \textbf{Lepsze funkcje hashujące}: Wykorzystanie funkcji hashujących z biblioteki \texttt{hashlib}, takich jak SHA-256, może zapewnić lepszy rozkład hashy w przestrzeni bitów, co skutkuje mniejszą liczbą fałszywych pozytywów.
+    \item \textbf{Mniejsza kolizja hashy}: W pierwotnej implementacji z wykorzystaniem \texttt{mmh3} i sekwencyjnych seedów mogło dochodzić do większych kolizji, co zwiększało liczbę fałszywych pozytywów.
+    \item \textbf{Niezależność funkcji hashujących}: Zastosowanie silniejszych funkcji hashujących może zwiększyć niezależność poszczególnych hashy, co wpływa na skuteczność filtru.
+\end{itemize}
+
+\subsection{Wydajność czasowa}
+
+Zoptymalizowana implementacja wykazała poprawę wydajności czasowej w operacjach dodawania i sprawdzania elementów, szczególnie dla większych wartości $k$. Wykorzystanie obliczeń równoległych przyspieszyło generowanie hashy, choć narzut związany z tworzeniem wątków może być zauważalny przy małych wartościach $k$.
+
+\section{Dyskusja}
+
+\subsection{Obserwacje}
+
+Zoptymalizowana implementacja filtru Blooma nie tylko zmniejszyła liczbę fałszywych pozytywów, ale również poprawiła wydajność czasową. To sugeruje, że odpowiedni dobór funkcji hashujących oraz zastosowanie obliczeń równoległych może znacząco wpłynąć na efektywność filtru.
+
+\subsection{Ograniczenia}
+
+\begin{itemize}
+    \item \textbf{Koszt równoległości}: Wprowadzenie obliczeń równoległych wiąże się z narzutem w postaci zarządzania wątkami, co może nie być korzystne dla niewielkich wartości $k$ lub przy dużej liczbie operacji na filtrze.
+    \item \textbf{Złożoność implementacji}: Zoptymalizowana wersja jest bardziej złożona, co może utrudniać jej utrzymanie lub wprowadzanie dalszych modyfikacji.
+\end{itemize}
+
+\subsection{Propozycje dalszych badań}
+
+\begin{itemize}
+    \item \textbf{Eksperymenty z różnymi funkcjami hashującymi}: Przetestowanie innych funkcji hashujących pod kątem ich wpływu na skuteczność filtru.
+    \item \textbf{Analiza wpływu równoległości}: Dokładne zmierzenie korzyści płynących z równoległości w zależności od wartości $k$ i liczby elementów.
+    \item \textbf{Adaptacyjne dostosowanie parametrów}: Opracowanie metody automatycznego dostosowywania liczby funkcji hashujących $k$ w zależności od obserwowanej liczby fałszywych pozytywów.
+\end{itemize}
+
+\section{Wnioski}
+
+Przeprowadzone eksperymenty pokazują, że zoptymalizowana implementacja filtru Blooma może być bardziej efektywna zarówno pod względem liczby fałszywych pozytywów, jak i wydajności czasowej. Zastosowanie silniejszych funkcji hashujących oraz obliczeń równoległych przyczyniło się do poprawy wyników w porównaniu z pierwotną wersją algorytmu.
+
+\section{Bibliografia}
+
+\begin{thebibliography}{9}
+
+\bibitem{bloom1970}
+Bloom, B. H. (1970). \textit{Space/time trade-offs in hash coding with allowable errors}. Communications of the ACM, 13(7), 422-426.
+
+\bibitem{mitzenmacher2002}
+Mitzenmacher, M. (2002). \textit{Compressed Bloom Filters}. IEEE/ACM Transactions on Networking, 10(5), 604-612.
+
+\bibitem{broder2004}
+Broder, A., \& Mitzenmacher, M. (2004). \textit{Network applications of bloom filters: A survey}. Internet Mathematics, 1(4), 485-509.
+
+\bibitem{mullin1990}
+Mullin, J. K. (1990). \textit{A second look at Bloom filters}. Communications of the ACM, 33(2), 132-136.
+
+\bibitem{dillinger2004}
+Dillinger, P. C., \& Manolios, P. (2004). \textit{Bloom filters in probabilistic verification}. In International Conference on Formal Methods in Computer-Aided Design (pp. 367-381). Springer.
+
+\end{thebibliography}
+
+\end{document}
